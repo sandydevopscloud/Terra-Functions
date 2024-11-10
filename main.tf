@@ -5,83 +5,88 @@ resource "aws_vpc" "vpc-terra" {
   enable_dns_support   = "true"
 
   tags = {
-    Name = var.vpc_tags #"vpc-terra"
+    Name        = var.vpc_name #"vpc-terra"
+    owner       = "PROD"
+    costcenter  = "Hyd-8"
+    environment = var.environment
   }
 }
 
-resource "aws_subnet" "subnet1-terra" {
+resource "aws_subnet" "public-subnet" {
+  count             = length(var.public_cidr_block)
   vpc_id            = aws_vpc.vpc-terra.id
-  cidr_block        = var.public_subnet1_cidr
-  availability_zone = var.sub_az
+  cidr_block        = element(var.public_cidr_block, count.index + 1)
+  availability_zone = element(var.azs, count.index)
   tags = {
-    Name = "${var.public_subnet1_name}"
+    Name = "${var.vpc_name}-public-subnet-${count.index + 1}"
   }
 }
 
-resource "aws_subnet" "subnet2-terra" {
+resource "aws_subnet" "private-subnet" {
+  count             = length(var.private_cidr_block)
   vpc_id            = aws_vpc.vpc-terra.id
-  cidr_block        = var.public_subnet2_cidr
-  availability_zone = "eu-north-1b"
+  cidr_block        = element(var.private_cidr_block, count.index + 1)
+  availability_zone = element(var.azs, count.index)
 
   tags = {
-    Name = "${var.public_subnet2_name}"
+    Name = "${var.vpc_name}-private-subnet-${count.index + 1}"
   }
-}
-
-resource "aws_subnet" "subnet3-terra" {
-  vpc_id            = aws_vpc.vpc-terra.id
-  cidr_block        = var.public_subnet3_cidr
-  availability_zone = var.sub_az
-
-  tags = {
-    Name = "${var.public_subnet3_name}"
-  }
-
 }
 
 resource "aws_internet_gateway" "igw-terra" {
   vpc_id = aws_vpc.vpc-terra.id
 
   tags = {
-    Name = var.igw_tags #"igw-terra"
+    Name = "${var.vpc_name}-IGW"
   }
 }
 
-resource "aws_route_table" "rt-terra" {
+resource "aws_route_table" "public-rt-terra" {
   vpc_id = aws_vpc.vpc-terra.id
 
   route {
-    cidr_block = var.rt_cidr_block #"0.0.0.0/0"
+    cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.igw-terra.id
   }
 
   tags = {
-    Name = var.rt_tags #"rt-terra"
+    Name = "${var.vpc_name}-public-route-table"
   }
 }
 
-resource "aws_route_table_association" "rta-terra" {
-  subnet_id      = aws_subnet.subnet1-terra.id
-  route_table_id = aws_route_table.rt-terra.id
+resource "aws_route_table" "private-rt-terra" {
+  vpc_id = aws_vpc.vpc-terra.id
+
+  tags = {
+    Name = "${var.vpc_name}-private-route-table"
+  }
+}
+
+resource "aws_route_table_association" "public-rta-terra" {
+  count          = length(var.public_cidr_block)
+  subnet_id      = element(aws_subnet.public-subnet.*.id, count.index + 1)
+  route_table_id = aws_route_table.public-rt-terra.id
+}
+
+resource "aws_route_table_association" "private-rta-terra" {
+  count          = length(var.private_cidr_block)
+  subnet_id      = element(aws_subnet.private-subnet.*.id, count.index + 1)
+  route_table_id = aws_route_table.private-rt-terra.id
 }
 
 resource "aws_security_group" "allow_all" {
-  name        = "allow_all"
+  name        = "${var.vpc_name}-security-group"
   description = "Allow TLS inbound traffic and all outbound traffic"
   vpc_id      = aws_vpc.vpc-terra.id
 
-  ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    description = "Allow SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  dynamic "ingress" {
+    for_each = var.ingress_value
+    content {
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"] # Allowing Traffic from Any IP
+    }
   }
 
   egress {
@@ -92,7 +97,7 @@ resource "aws_security_group" "allow_all" {
   }
 
   tags = {
-    Name = "allow_all"
+    Name = "${var.vpc_name}-Allow-ALL"
   }
 }
 
